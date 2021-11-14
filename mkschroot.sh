@@ -130,7 +130,7 @@ fi
 [ -n "$CHROOTPATH" ] || CHROOTPATH="/var/chroots/$SCHROOTNAME"
 [ -n "$FRIENDLYNAME" ] || FRIENDLYNAME="$(tr '[:lower:]' '[:upper:]' <<< ${UBUNTUFLAVOR:0:1})${UBUNTUFLAVOR:1} Schroot"
 
-SCHROOTCONF="/etc/schroot/schroot.conf"
+SCHROOTCONF="/etc/schroot/chroot.d/$SCHROOTNAME"
 
 #
 # construct schroot config
@@ -162,16 +162,12 @@ install_schroot() {
     [ -x /usr/sbin/debootstrap ] || missing_packages
     [ -x /usr/bin/schroot ] || missing_packages
 
-    [ -e "$SCHROOTCONF" ] || error "Missing $SCHROOTCONF."
-
     fstab_file="/etc/schroot/$SCHROOTNAME/fstab"
 
     #
     # check for destructive actions early
     #
-    if [ -z "$opt_force" ] && grep -q "^\[$SCHROOTNAME\]" "$SCHROOTCONF"; then
-        error "$SCHROOTNAME already added to schroot.conf. Refusing to proceed without --force."
-    fi
+    [ ! -e "$SCHROOTCONF" ] || [ -n "$opt_force" ] || error "$SCHROOTCONF already exists. Refusing to overwrite without --force."
     [ ! -e "$fstab_file" ] || [ -n "$opt_force" ] || error "$fstab_file already exists. Refusing to overwrite without --force."
     [ ! -e "$CHROOTPATH" ] || [ -n "$opt_force" ] || error "$CHROOTPATH already exists. Refusing to overwrite without --force."
 
@@ -212,10 +208,10 @@ install_schroot() {
     #
     # add entry to schroot.conf
     #
-    if ! grep -q "^\[$SCHROOTNAME\]" "$SCHROOTCONF"; then
-        echo "$SCHROOTCONFIG" | sudo tee -a "$SCHROOTCONF" 1>/dev/null
+    if [ ! -f "$SCHROOTCONF" ]; then
+        echo "$SCHROOTCONFIG" | sudo tee "$SCHROOTCONF" 1>/dev/null
     else
-        echo "WARNING: $SCHROOTNAME already in schroot.conf. The file has not been modified." >&2
+        echo "WARNING: $SCHROOTCONF already exists. The file has not been modified." >&2
         echo "Ensure the configuration matches the below:" >&2
         echo "$SCHROOTCONFIG" >&2
         echo >&2
@@ -230,7 +226,7 @@ install_schroot() {
         echo "LC_ALL=en_US.UTF-8
 en_US.UTF-8 UTF-8
 LANG=en_US.UTF-8" | sudo tee "$CHROOTPATH/etc/locale.conf" >/dev/null
-        schroot -c "$SCHROOTNAME" -d / -- sudo locale-gen en_US.UTF-8
+        schroot -c "$SCHROOTNAME" -d / -u root -- locale-gen en_US.UTF-8
     fi
 
     #
@@ -253,16 +249,16 @@ deb http://us.archive.ubuntu.com/ubuntu/ %s-updates main restricted\n\n\n\n" "$U
         # for older distros, we need to divert upstart
         #
         if [ "$UBUNTUFLAVOR" == "precise" ] || [ "$UBUNTUFLAVOR" == "trusty" ]; then
-            schroot -c "$SCHROOTNAME" -d / -- sudo dpkg-divert --local --rename --add /sbin/initctl
-            schroot -c "$SCHROOTNAME" -d / -- sudo ln -s /bin/true /sbin/initctl
+            schroot -c "$SCHROOTNAME" -d / -u root -- dpkg-divert --local --rename --add /sbin/initctl
+            schroot -c "$SCHROOTNAME" -d / -u root -- ln -s /bin/true /sbin/initctl
         fi
     fi
 
     #
     # update apt
     #
-    schroot -c "$SCHROOTNAME" -d / -- sudo apt-get update
-    schroot -c "$SCHROOTNAME" -d / -- sudo apt-get upgrade -y
+    schroot -c "$SCHROOTNAME" -d / -u root -- apt-get update
+    schroot -c "$SCHROOTNAME" -d / -u root -- apt-get upgrade -y
 
     #
     # now set up mounting of /run/shm and /dev/shm
