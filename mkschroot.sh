@@ -228,7 +228,7 @@ install_schroot() {
         if [ -f "$CHROOTPATH/etc/sudoers.d/$USER" ] && [ -n "$opt_skip" ]; then
             echo "WARNING: sudoers.d already set up. Skipping."
         else
-            echo "$USER ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee "$CHROOTPATH/etc/sudoers.d/$USER"
+            echo "$USER ALL=(ALL:ALL) ALL" | sudo tee "$CHROOTPATH/etc/sudoers.d/$USER"
         fi
     else
         echo "WARNING: no sudoers.d in chroot. Sudo may not work correctly."
