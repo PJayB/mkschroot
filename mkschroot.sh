@@ -74,6 +74,7 @@ usage() {
     echo "  --release|-r <xenial>           - sets Ubuntu flavor"
     echo "  --path|-p </var/chroots/name>   - sets path of chroot"
     echo "  --name <Friendly Name>          - sets the friendly name of the schroot"
+    echo "  --passwd|-p                     - prompt for new password inside the schroot (fixes sudo)"
     echo "  --force|-f                      - overwrite existing schroot"
     echo "  --force|-f --skip               - skip steps that might already be complete"
 }
@@ -118,6 +119,7 @@ while [ -n "$1" ]; do
         --user|-u)      set_user "$2" ; shift ;;
         --skip)         opt_skip=yes ;;
         --force|-f)     opt_force=yes ;;
+        --passwd|-p)    opt_passwd=yes ;;
         --help)         usage ; exit 0 ;;
         --*)            bad_usage "Unknown option $1" ;;
         *)              set_name "$1" ;;
@@ -149,7 +151,8 @@ groups=sudo
 root-groups=sudo
 preserve-environment=true
 type=directory
-setup.fstab=$SCHROOTNAME/fstab"
+setup.fstab=$SCHROOTNAME/fstab
+setup.nssdatabases=$SCHROOTNAME/nssdatabases"
 
 add_mount_to_fstab() {
     entry="$1"
@@ -167,12 +170,14 @@ install_schroot() {
     [ -x /usr/bin/schroot ] || missing_packages
 
     fstab_file="/etc/schroot/$SCHROOTNAME/fstab"
+    nssdatabases_file="/etc/schroot/$SCHROOTNAME/nssdatabases"
 
     #
     # check for destructive actions early
     #
     [ ! -e "$SCHROOTCONF" ] || [ -n "$opt_force" ] || error "$SCHROOTCONF already exists. Refusing to overwrite without --force."
     [ ! -e "$fstab_file" ] || [ -n "$opt_force" ] || error "$fstab_file already exists. Refusing to overwrite without --force."
+    [ ! -e "$nssdatabases_file" ] || [ -n "$opt_force" ] || error "$nssdatabases_file already exists. Refusing to overwrite without --force."
     [ ! -e "$CHROOTPATH" ] || [ -n "$opt_force" ] || error "$CHROOTPATH already exists. Refusing to overwrite without --force."
 
     set -e
@@ -210,15 +215,53 @@ install_schroot() {
     fi
 
     #
+    # Set up nssdatabases
+    #
+
+    # Configure which databases we want to override
+    if [ -n "$opt_passwd" ]; then
+        databases_to_skip+=( passwd shadow group gshadow )
+    fi
+
+    # Set up the nssdatabases file
+    if [ -f "$nssdatabases_file" ] && [ -n "$opt_skip" ]; then
+        echo "WARNING: $nssdatabases_file already exists. Skipping."
+    elif (( "${#databases_to_skip[@]}" )); then
+        # Copy these files as a one-time copy (the schroot won't do it for us any more).
+        grep_args=()
+        for i in "${databases_to_skip[@]}"; do
+            sudo cp -vf "/etc/$i" "$CHROOTPATH/etc/$i"
+            grep_args+=( -e "$i" )
+        done
+
+        # Create the nssdatabases list without the above entries
+        grep -v "${grep_args[@]}" \
+            "/etc/schroot/default/nssdatabases" |
+            sudo tee "$nssdatabases_file" >/dev/null
+    else
+        sudo cp "/etc/schroot/default/nssdatabases" "$nssdatabases_file"
+    fi
+
+    #
     # add entry to schroot.conf
     #
     if [ ! -f "$SCHROOTCONF" ]; then
-        echo "$SCHROOTCONFIG" | sudo tee "$SCHROOTCONF" 1>/dev/null
+        echo "$SCHROOTCONFIG" | sudo tee "$SCHROOTCONF" >/dev/null
     else
         echo "WARNING: $SCHROOTCONF already exists. The file has not been modified." >&2
         echo "Ensure the configuration matches the below:" >&2
         echo "$SCHROOTCONFIG" >&2
         echo >&2
+    fi
+
+    #
+    # Optional password reset
+    #
+    if [ -n "$opt_passwd" ]; then
+        # Ask users to re-enter their password to make sure that /etc/shadow uses a compatible
+        # hashing algorithm inside the schroot
+        echo "Enter a password for sudo access inside the schroot. Ctrl-D twice to cancel."
+        schroot -c "$SCHROOTNAME" -d / -u root -- passwd "$USER"
     fi
 
     #
@@ -228,7 +271,8 @@ install_schroot() {
         if [ -f "$CHROOTPATH/etc/sudoers.d/$USER" ] && [ -n "$opt_skip" ]; then
             echo "WARNING: sudoers.d already set up. Skipping."
         else
-            echo "$USER ALL=(ALL:ALL) ALL" | sudo tee "$CHROOTPATH/etc/sudoers.d/$USER"
+            echo "$USER ALL=(ALL:ALL) ALL" | sudo tee "$CHROOTPATH/etc/sudoers.d/$USER" >/dev/null
+            sudo chmod go-rw "$CHROOTPATH/etc/sudoers.d/$USER"
         fi
     else
         echo "WARNING: no sudoers.d in chroot. Sudo may not work correctly."
