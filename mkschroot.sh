@@ -106,12 +106,16 @@ set_path() {
 set_fname() {
     [ -z "$FRIENDLYNAME" ] || bad_usage "Duplicate friendly name." ; FRIENDLYNAME="$1"
 }
+set_user() {
+    [ -n "$1" ] || bad_usage "Username required." ; export USER="$1"
+}
 
 while [ -n "$1" ]; do
     case "$1" in
         --release|-r)   set_flavor "$2" ; shift ;;
         --path|-p)      set_path "$2" ; shift ;;
         --name)         set_fname "$2" ; shift ;;
+        --user|-u)      set_user "$2" ; shift ;;
         --skip)         opt_skip=yes ;;
         --force|-f)     opt_force=yes ;;
         --help)         usage ; exit 0 ;;
@@ -215,6 +219,19 @@ install_schroot() {
         echo "Ensure the configuration matches the below:" >&2
         echo "$SCHROOTCONFIG" >&2
         echo >&2
+    fi
+
+    #
+    # copy sudoers.d file if sudoers.d exists in the schroot
+    #
+    if [ -d "$CHROOTPATH/etc/sudoers.d" ]; then
+        if [ -f "$CHROOTPATH/etc/sudoers.d/$USER" ] && [ -n "$opt_skip" ]; then
+            echo "WARNING: sudoers.d already set up. Skipping."
+        else
+            echo "$USER ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee "$CHROOTPATH/etc/sudoers.d/$USER"
+        fi
+    else
+        echo "WARNING: no sudoers.d in chroot. Sudo may not work correctly."
     fi
 
     #
